@@ -71,7 +71,6 @@ static void schedule(void);
 void thread_schedule_tail(struct thread *prev);
 static tid_t allocate_tid(void);
 static void thread_insert_ready_list_ordered(struct list_elem *);
-static bool thread_priority_is_higher(const struct list_elem *, const struct list_elem *, void *aux UNUSED);
 static void thread_verify_running_priority(void);
 
 /* Initializes the threading system by transforming the code
@@ -514,9 +513,8 @@ thread_insert_ready_list_ordered(struct list_elem *elem)
 }
 
 /* Function to determine if the priority of A is higher than B */
-static bool
-thread_priority_is_higher(const struct list_elem *a_, const struct list_elem *b_,
-                          void *aux UNUSED)
+bool thread_priority_is_higher(const struct list_elem *a_, const struct list_elem *b_,
+                               void *aux UNUSED)
 {
   const struct thread *a = list_entry(a_, struct thread, elem);
   const struct thread *b = list_entry(b_, struct thread, elem);
