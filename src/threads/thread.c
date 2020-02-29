@@ -28,6 +28,10 @@ static struct list ready_list;
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
 
+/* List of all processes in sleeping time, they are all blocked
+   and waiting for their time ticks exceed */
+static struct list sleeping_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -93,6 +97,7 @@ void thread_init(void)
   lock_init(&tid_lock);
   list_init(&ready_list);
   list_init(&all_list);
+  list_init(&sleeping_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread();
@@ -119,7 +124,7 @@ void thread_start(void)
 
 /* Called by the timer interrupt handler at each timer tick.
    Thus, this function runs in an external interrupt context. */
-void thread_tick(void)
+void thread_tick(int64_t ticks)
 {
   struct thread *t = thread_current();
 
@@ -133,9 +138,51 @@ void thread_tick(void)
   else
     kernel_ticks++;
 
+  //Verify sleeping threads
+  thread_wake(ticks);
+
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return();
+}
+
+/* Put thread to sleep and add to sleeping_list to wake after ticks */
+void thread_sleep(int64_t ticks)
+{
+  struct thread *t = thread_current();
+  enum intr_level old_level = intr_disable();
+
+  if (t != idle_thread)
+  {
+    t->sleeping_ticks = ticks;
+    list_push_back(&sleeping_list, &t->sleeping_elem);
+    thread_block();
+  }
+
+  intr_set_level(old_level);
+}
+
+/* If there are sleeping threads then verify if any exceeded time */
+void thread_wake(int64_t ticks)
+{
+  if (!list_empty(&sleeping_list))
+  {
+    struct list_elem *e;
+
+    ASSERT(intr_get_level() == INTR_OFF);
+
+    for (e = list_begin(&sleeping_list); e != list_end(&sleeping_list);
+         e = list_next(e))
+    {
+      struct thread *t = list_entry(e, struct thread, sleeping_elem);
+      if (t->sleeping_ticks <= ticks)
+      {
+        list_remove(&t->sleeping_elem);
+        t->sleeping_ticks = 0;
+        thread_unblock(t);
+      }
+    }
+  }
 }
 
 /* Prints thread statistics. */
@@ -244,6 +291,29 @@ void thread_unblock(struct thread *t)
   thread_insert_ready_list_ordered(&t->elem);
   t->status = THREAD_READY;
   intr_set_level(old_level);
+}
+
+/* Unblock the thread like thread_unblock function does, but guarantee the thread will be executed as it was before sleeping */
+void thread_unblock_and_start(struct thread *t)
+{
+  enum intr_level old_level;
+
+  ASSERT(is_thread(t));
+
+  old_level = intr_disable();
+  ASSERT(t->status == THREAD_BLOCKED);
+  list_push_front(&ready_list, &t->elem);
+  t->status = THREAD_READY;
+  intr_set_level(old_level);
+
+  if (intr_context())
+  {
+    intr_yield_on_return();
+  }
+  else
+  {
+    thread_yield();
+  }
 }
 
 /* Returns the name of the running thread. */
@@ -413,7 +483,6 @@ idle(void *idle_started_ UNUSED)
                  : "memory");
   }
 }
-
 /* Function used as the basis for a kernel thread. */
 static void
 kernel_thread(thread_func *function, void *aux)
