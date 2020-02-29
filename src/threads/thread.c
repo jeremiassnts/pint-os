@@ -74,6 +74,8 @@ static void *alloc_frame(struct thread *, size_t size);
 static void schedule(void);
 void thread_schedule_tail(struct thread *prev);
 static tid_t allocate_tid(void);
+static void thread_insert_ready_list_ordered(struct list_elem *);
+static void thread_verify_running_priority(void);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -285,7 +287,8 @@ void thread_unblock(struct thread *t)
 
   old_level = intr_disable();
   ASSERT(t->status == THREAD_BLOCKED);
-  list_push_back(&ready_list, &t->elem);
+  // list_push_back(&ready_list, &t->elem);
+  thread_insert_ready_list_ordered(&t->elem);
   t->status = THREAD_READY;
   intr_set_level(old_level);
 }
@@ -376,7 +379,8 @@ void thread_yield(void)
 
   old_level = intr_disable();
   if (cur != idle_thread)
-    list_push_back(&ready_list, &cur->elem);
+    // list_push_back(&ready_list, &cur->elem);
+    thread_insert_ready_list_ordered(&cur->elem);
   cur->status = THREAD_READY;
   schedule();
   intr_set_level(old_level);
@@ -402,6 +406,8 @@ void thread_foreach(thread_action_func *func, void *aux)
 void thread_set_priority(int new_priority)
 {
   thread_current()->priority = new_priority;
+  list_sort(&ready_list, thread_priority_is_higher, NULL);
+  thread_verify_running_priority();
 }
 
 /* Returns the current thread's priority. */
@@ -553,6 +559,38 @@ next_thread_to_run(void)
     return idle_thread;
   else
     return list_entry(list_pop_front(&ready_list), struct thread, elem);
+}
+
+/* Verify if running thread has the priority to be running */
+static void
+thread_verify_running_priority(void)
+{
+  struct list_elem *elem = list_head(&ready_list);
+  struct thread *t = list_entry(elem, struct thread, elem);
+  struct thread *cur = running_thread();
+
+  if (t->priority > cur->priority)
+  {
+    thread_yield();
+  }
+}
+
+/* Insert thread on ready_list keeping ordering */
+static void
+thread_insert_ready_list_ordered(struct list_elem *elem)
+{
+  list_insert_ordered(&ready_list, elem, thread_priority_is_higher, NULL);
+  thread_verify_running_priority();
+}
+
+/* Function to determine if the priority of A is higher than B */
+bool thread_priority_is_higher(const struct list_elem *a_, const struct list_elem *b_,
+                               void *aux UNUSED)
+{
+  const struct thread *a = list_entry(a_, struct thread, elem);
+  const struct thread *b = list_entry(b_, struct thread, elem);
+
+  return a->priority > b->priority;
 }
 
 /* Completes a thread switch by activating the new thread's page
