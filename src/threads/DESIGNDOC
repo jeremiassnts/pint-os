@@ -1,0 +1,97 @@
++-----------------+
+|     CS 140      |
+|    PROJETO 1    |
+| DESIGN DOCUMENT |
++-----------------+
+
+---- GRUPO ----
+
+Jeremias dos Santos Francelino <jeremiassnts3@gmail.com>
+Natanel Gois <natanaelgois36@gmail.com>
+
+---- PRELIMINARES ----
+
+Infelizmente não foi possível fazer os testes passarem, apesar das implementações de prioridade e sleep de threads sem uso de espera ocupada.
+O código fonte desenvolvido até esta etapa está disponível no repositório já informado, na branch threads.
+
+STALLINGS, W. Operating Systems Internals and Design Principles, Pearson, 9ª Ed, 2018.
+
+	ALARM CLOCK
+	===========
+
+---- DATA STRUCTURES ----
+
+Atributos adicionados ao struct thread, em thread.h
+	int64_t sleeping_ticks;             /* Thread final tick of sleeping time */
+	struct list_elem sleeping_elem; /* List element for sleeping threads list. */
+
+Lista de threads colocadas para "dormir", presente no arquivo thread.c
+	/* List of all processes in sleeping time, they are all blocked
+	   and waiting for their time ticks exceed */
+	static struct list sleeping_list;
+
+
+Reimplementação da função chamada em interrupção externa, agora enviando ticks para controle de bloqueio de thread dentro do arquivo de threads, ao final das incrementações de ticks no thread_tick, verifica se alguma thread já pode "acordar"
+	void thread_tick(int64_t ticks)
+
+---- ALGORITHMS ----
+
+Funções para controle de sleep e wake de threads respectivamente em thread.h e thread.c
+thread_sleep realiza ações necessárias para bloquear thread, inserir na lista de sleeping_threads, e salvar quantos ticks deve dormir.
+	/* Insert thread in sleeping list */
+	void thread_sleep(struct thread *);
+A cada ciclo de interrupção externa de timer, verifica em todos os elementos da lista de sleeping_threads se alguma já excedeu o tempo de sleep, caso sim, remove da lista de sleeping_threads e realiza unblock nas threads
+	/* If there are sleeping threads then verify if any exceeded time */
+	void thread_wake(int64_t ticks);
+
+Inicialmente com o objetivo de realizar unblock nas threads e garantir que sejam executadas, mas posteriormente não foi mais utilizada
+	void thread_unblock_and_start(struct thread *t)
+
+Em timer.c, função timer_sleep reimplementada usando função thread_sleep para controle de sleep de thread fora de timer.c, utilizando interrupção externa para evitar espera ocupada
+	void timer_sleep(int64_t ticks);
+envia através de thread_tick valor atual de ticks para controle posterior de tempo de bloqueio das threads
+	timer_interrupt(struct intr_frame *args UNUSED)
+
+---- SYNCHRONIZATION ----
+
+---- RATIONALE ----
+
+Como objetivo desta seção do projeto 1, foi implementada uma solução para evitar a espera ocupada, utilizando a interrupção externa de timer e funções de bloqueio e desbloqueio fornecidas pelo arquivo de threads, temos a cada interupção uma checagem de tempo para garantir que threads não "durmam" mais que o solicitado, nesse contexto, quanto mais threads bloqueadas, maior se torna a lista de threads dormindo, o que pode em algum momento se tornar um problema pela quantidade de verificações por tick, uma possível forma de melhorar isso, seria inserir as threads na lista de forma ordenada, crescente em função do tempo de espera, dessa forma, só seria necessário verificar threads até a primeira que não tivesse disponível ainda, pois todas as depois dela também não estariam.
+
+
+	PRIORITY SCHEDULING
+	===================
+
+---- DATA STRUCTURES ----
+
+---- ALGORITHMS ----
+
+Em thread.c
+
+Gerencia a inserção de threads na lista de prontos, de forma que garante a prioridade sendo mantida para posteriores schedule's
+	static void thread_insert_ready_list_ordered(struct list_elem *); /* Insert thread on ready_list keeping ordering */
+Modifica as seguintes funções para uso de thread_insert_ready_list_ordered ao invés de simplesmente inserir no final da lista de prontos
+	void thread_yield(void);
+	void thread_unblock(struct thread *);
+
+Realiza uma comparação entre a prioridade de duas threads, retornando verdadeiro caso a tenha maior prioridade que b, função necessária para ordenação
+	bool thread_priority_is_higher(const struct list_elem *a_, const struct list_elem *b_, void *aux UNUSED); /* Function to determine if the priority of A is higher than B */
+
+Verifica se a thread que está sendo executada realmente tem a maior prioridade baseando-se na lista de threads prontas, que deve estar ordenada, caso a atual thread não tenha a maior prioridade, realiza um thread_yield para ajuste e execução da thread correta.
+	static void thread_verify_running_priority(void); /* Verify if running thread has the priority to be running */
+
+Altera prioridade e garante que ready_list vai se manter ordenada, em seguida garante que a thread de maior prioridade vai ser executada
+	void thread_set_priority(int new_priority);
+
+Em synch.c
+
+Controle de semáforo modificado para manter prioridade ao inserir em lista de waiters.
+	void sema_down(struct semaphore *sema);
+
+Controle de condition modificado para manter prioridade ao inserir em lista de waiters.
+	void cond_wait(struct condition *cond, struct lock *lock);
+
+
+---- SYNCHRONIZATION ----
+
+---- RATIONALE ----
